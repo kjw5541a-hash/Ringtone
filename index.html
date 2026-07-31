@@ -283,7 +283,7 @@
       <details class="howto">
         <summary>다음 단계 · 아이폰에 벨소리로 등록하기</summary>
         <ol>
-          <li>다운로드한 <b>.m4r</b> 파일을 길게 눌러 <b>GarageBand로 복사</b>를 선택해요.</li>
+          <li>다운로드한 파일(.wav 또는 .m4r)을 길게 눌러 <b>GarageBand로 복사</b>를 선택해요.</li>
           <li>GarageBand에서 왼쪽 위로 나가 <b>내 노래</b>로 저장한 뒤, 길게 눌러 <b>공유 → 벨소리</b>를 선택해요.</li>
           <li>이름을 정하고 내보내기 → <b>사운드로 사용</b>을 누르면 등록 완료예요.</li>
           <li>설정 → 사운드 및 햅틱 → 벨소리에서 방금 만든 벨소리를 선택할 수 있어요.</li>
@@ -837,144 +837,79 @@
   }
 
   // ---------- Export ----------
-  var ffmpegInstance = null;
-  var LOCAL_CORE_BASE = './ffmpeg-core';
-  var CDN_CORE_BASE = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm';
-  var STALL_LIMIT_MS = 15000;   // fail only if NO new bytes arrive for this long
-  var INIT_TIMEOUT_MS = 45000;  // WASM compile of ~30MB is CPU-bound and genuinely slow on mobile
-
-  function withTimeout(promise, ms, tag){
-    return new Promise(function(resolve, reject){
-      var timer = setTimeout(function(){ reject(new Error(tag)); }, ms);
-      promise.then(
-        function(v){ clearTimeout(timer); resolve(v); },
-        function(e){ clearTimeout(timer); reject(e); }
-      );
-    });
-  }
-
-  // Fetches a URL while reporting real byte progress, so slow-but-moving
-  // downloads are never confused with a genuinely stalled connection.
-  function fetchWithProgress(url, mimeType, onProgress, signal){
-    return fetch(url, { signal: signal }).then(function(resp){
-      if (!resp.ok) throw new Error('HTTP ' + resp.status + ' for ' + url);
-      var total = parseInt(resp.headers.get('Content-Length') || '0', 10);
-      var loaded = 0;
-      var reader = resp.body.getReader();
-      var chunks = [];
-      function pump(){
-        return reader.read().then(function(result){
-          if (result.done){
-            return URL.createObjectURL(new Blob(chunks, { type: mimeType }));
-          }
-          chunks.push(result.value);
-          loaded += result.value.byteLength;
-          if (onProgress) onProgress(loaded, total);
-          return pump();
-        });
-      }
-      return pump();
-    });
-  }
-
-  // Prefer a same-origin copy of the engine (fast, no CDN dependency) if the
-  // repo ships one at ./ffmpeg-core/; otherwise fall back to jsdelivr.
-  function resolveCoreBase(){
-    return fetch(LOCAL_CORE_BASE + '/ffmpeg-core.js', { method: 'HEAD' })
-      .then(function(resp){ return resp.ok ? LOCAL_CORE_BASE : CDN_CORE_BASE; })
-      .catch(function(){ return CDN_CORE_BASE; });
-  }
-
-  function loadFFmpeg(onProgress){
-    if (ffmpegInstance) return Promise.resolve(ffmpegInstance);
-
-    return import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js')
-      .then(function(mod){
-        var ffmpeg = new mod.FFmpeg();
-        return resolveCoreBase().then(function(baseURL){
-          var loadedBytes = { js: 0, wasm: 0 };
-          var totalBytes = { js: 0, wasm: 0 };
-          var lastProgressAt = Date.now();
-          var controller = new AbortController();
-
-          var stallWatcher = setInterval(function(){
-            if (Date.now() - lastProgressAt > STALL_LIMIT_MS){
-              clearInterval(stallWatcher);
-              controller.abort();
-            }
-          }, 1000);
-
-          function reportProgress(){
-            lastProgressAt = Date.now();
-            var loaded = loadedBytes.js + loadedBytes.wasm;
-            var total = totalBytes.js + totalBytes.wasm;
-            if (onProgress) onProgress(loaded, total);
-          }
-
-          var jsPromise = fetchWithProgress(baseURL + '/ffmpeg-core.js', 'text/javascript', function(l, t){
-            loadedBytes.js = l; totalBytes.js = t; reportProgress();
-          }, controller.signal);
-
-          var wasmPromise = fetchWithProgress(baseURL + '/ffmpeg-core.wasm', 'application/wasm', function(l, t){
-            loadedBytes.wasm = l; totalBytes.wasm = t; reportProgress();
-          }, controller.signal);
-
-          return Promise.all([jsPromise, wasmPromise])
-            .then(function(urls){
-              clearInterval(stallWatcher);
-              var initStart = Date.now();
-              var initTicker = setInterval(function(){
-                if (onProgress) onProgress(-1, Math.floor((Date.now() - initStart) / 1000));
-              }, 1000);
-              if (onProgress) onProgress(-1, 0);
-              return withTimeout(
-                ffmpeg.load({ coreURL: urls[0], wasmURL: urls[1] }),
-                INIT_TIMEOUT_MS,
-                'FFMPEG_INIT_TIMEOUT'
-              ).finally(function(){ clearInterval(initTicker); });
-            })
-            .then(function(){
-              ffmpegInstance = ffmpeg;
-              return ffmpeg;
-            })
-            .catch(function(err){
-              clearInterval(stallWatcher);
-              if (err && err.name === 'AbortError'){
-                throw new Error('FFMPEG_STALLED');
-              }
-              throw err;
-            });
-        });
-      });
-  }
-
   function sanitizeBaseName(name){
     var base = name.replace(/\.[^/.]+$/, '');
     base = base.replace(/[^a-zA-Z0-9가-힣_-]+/g, '_');
     return base || 'ringtone';
   }
 
-  function formatMB(bytes){
-    return (bytes / 1024 / 1024).toFixed(1);
+  // Waveform-art decoding is size-bounded (cosmetic, skippable). Export
+  // decoding is mandatory, so it's requested fresh here regardless of size,
+  // reusing an already-decoded buffer if one happens to be available.
+  function getAudioBufferForExport(){
+    if (state.audioBuffer) return Promise.resolve(state.audioBuffer);
+    return state.file.arrayBuffer().then(function(buf){
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      return audioCtx.decodeAudioData(buf.slice(0));
+    });
   }
 
-  function showEngineProgress(loaded, elapsedOrTotal){
-    if (loaded < 0){
-      progressBar.style.width = '100%';
-      var secs = elapsedOrTotal;
-      statusEl.textContent = secs > 0
-        ? '엔진 초기화 중... (' + secs + '초, 기기가 처음 한 번 컴파일하는 중이라 느릴 수 있어요)'
-        : '엔진 초기화 중...';
-      return;
+  // Slices [startSec, endSec) out of an AudioBuffer, applies a linear
+  // fade-in/out envelope directly to the samples, and encodes the result as
+  // a standard 16-bit PCM WAV file. Fully lossless from the decoded samples
+  // onward — no re-compression step, so no generation loss from fading.
+  function audioBufferToWav(buffer, startSec, endSec, fadeInSec, fadeOutSec){
+    var numChannels = buffer.numberOfChannels;
+    var sampleRate = buffer.sampleRate;
+    var startSample = Math.max(0, Math.floor(startSec * sampleRate));
+    var endSample = Math.min(buffer.length, Math.floor(endSec * sampleRate));
+    var frameCount = Math.max(0, endSample - startSample);
+    var selDurSec = frameCount / sampleRate;
+
+    var interleaved = new Float32Array(frameCount * numChannels);
+    for (var ch = 0; ch < numChannels; ch++){
+      var src = buffer.getChannelData(ch);
+      for (var i = 0; i < frameCount; i++){
+        var sample = src[startSample + i] || 0;
+        var t = i / sampleRate;
+        var gain = 1;
+        if (fadeInSec > 0 && t < fadeInSec) gain *= (t / fadeInSec);
+        var tFromEnd = selDurSec - t;
+        if (fadeOutSec > 0 && tFromEnd < fadeOutSec) gain *= Math.max(0, tFromEnd / fadeOutSec);
+        interleaved[i * numChannels + ch] = sample * gain;
+      }
     }
-    var total = elapsedOrTotal;
-    if (total > 0){
-      var pct = clamp((loaded / total) * 100, 0, 100);
-      progressBar.style.width = pct + '%';
-      statusEl.textContent = '엔진 받는 중... ' + formatMB(loaded) + 'MB / ' + formatMB(total) + 'MB (' + pct.toFixed(0) + '%)';
-    } else {
-      statusEl.textContent = '엔진 받는 중... ' + formatMB(loaded) + 'MB';
+
+    var blockAlign = numChannels * 2;
+    var dataSize = interleaved.length * 2;
+    var arrayBuf = new ArrayBuffer(44 + dataSize);
+    var view = new DataView(arrayBuf);
+
+    function writeString(offset, str){
+      for (var i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
     }
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);              // PCM
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, 16, true);              // bits per sample
+    writeString(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    var offset = 44;
+    for (var i = 0; i < interleaved.length; i++, offset += 2){
+      var s = Math.max(-1, Math.min(1, interleaved[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+
+    return new Blob([view], { type: 'audio/wav' });
   }
 
   generateBtn.addEventListener('click', function(){
@@ -990,77 +925,34 @@
 
     var needsTrim = !(Math.abs(start) < 0.02 && Math.abs(end - state.duration) < 0.02);
     var needsFade = fadeInToggle.checked || fadeOutToggle.checked;
-    var outName = sanitizeBaseName(state.file.name) + '.m4r';
+    var baseName = sanitizeBaseName(state.file.name);
 
     if (!needsTrim && !needsFade){
       // bit-perfect fast path: no processing needed at all
       statusEl.textContent = '원본 그대로 사용 (재인코딩 없음)';
-      finishDownload(state.file, outName);
+      finishDownload(state.file, baseName + '.m4r');
       generateBtn.disabled = false;
       previewBtn.disabled = false;
       return;
     }
 
-    var ext = (state.file.name.split('.').pop() || 'm4a').toLowerCase();
-    var inputName = 'input.' + ext;
-    var outputName = 'output.m4a';
+    statusEl.textContent = '오디오 처리 중...';
 
-    statusEl.textContent = '엔진 확인 중...';
-    progressWrap.style.display = 'block';
-    progressBar.style.width = '0%';
-
-    loadFFmpeg(showEngineProgress)
-      .then(function(ffmpeg){
-        ffmpeg.on('progress', function(p){
-          var pct = clamp((p.progress || 0) * 100, 0, 100);
-          progressBar.style.width = pct + '%';
-        });
-
-        statusEl.textContent = '파일 불러오는 중...';
-        return state.file.arrayBuffer().then(function(buf){
-          return ffmpeg.writeFile(inputName, new Uint8Array(buf));
-        }).then(function(){
-          var args = ['-ss', String(start), '-i', inputName, '-t', String(selDur)];
-
-          if (needsFade){
-            var filters = [];
-            if (fadeInToggle.checked){
-              filters.push('afade=t=in:st=0:d=' + parseFloat(fadeInDur.value).toFixed(2));
-            }
-            if (fadeOutToggle.checked){
-              var outStart = Math.max(0, selDur - parseFloat(fadeOutDur.value));
-              filters.push('afade=t=out:st=' + outStart.toFixed(2) + ':d=' + parseFloat(fadeOutDur.value).toFixed(2));
-            }
-            statusEl.textContent = '페이드 적용 중 (고음질 재인코딩, 256kbps)...';
-            args = args.concat(['-af', filters.join(','), '-c:a', 'aac', '-b:a', '256k', '-ar', '44100', outputName]);
-          } else {
-            statusEl.textContent = '무손실로 자르는 중...';
-            args = args.concat(['-c', 'copy', outputName]);
-          }
-
-          return ffmpeg.exec(args);
-        }).then(function(){
-          return ffmpeg.readFile(outputName);
-        }).then(function(data){
-          var blob = new Blob([data.buffer], { type: 'audio/mp4' });
-          progressWrap.style.display = 'none';
-          statusEl.textContent = '완료!';
-          finishDownload(blob, outName);
-          return Promise.all([
-            ffmpeg.deleteFile(inputName).catch(function(){}),
-            ffmpeg.deleteFile(outputName).catch(function(){})
-          ]);
-        });
+    getAudioBufferForExport()
+      .then(function(buffer){
+        var fadeIn = fadeInToggle.checked ? parseFloat(fadeInDur.value) : 0;
+        var fadeOut = fadeOutToggle.checked ? parseFloat(fadeOutDur.value) : 0;
+        var blob = audioBufferToWav(buffer, start, end, fadeIn, fadeOut);
+        statusEl.textContent = '완료! (WAV, 무손실)';
+        finishDownload(blob, baseName + '.wav');
       })
       .catch(function(err){
         console.error(err);
-        progressWrap.style.display = 'none';
-        if (err && err.message === 'FFMPEG_STALLED'){
-          statusEl.textContent = '다운로드가 멈췄어요 (15초간 진행 없음). 네트워크 상태를 확인하고 다시 시도해보세요.';
-        } else if (err && err.message === 'FFMPEG_INIT_TIMEOUT'){
-          statusEl.textContent = '엔진 초기화가 오래 걸려요. 다시 시도해보세요.';
+        var msg = (err && err.message) || '';
+        if (err && (err.name === 'RangeError' || /memory/i.test(msg))){
+          statusEl.textContent = '파일이 너무 커서 처리하지 못했어요. 더 짧은 곡으로 시도해보세요.';
         } else {
-          statusEl.textContent = '처리 중 문제가 발생했어요. 인터넷 연결을 확인하고 다시 시도해보세요.';
+          statusEl.textContent = '처리 중 문제가 발생했어요. 다시 시도해보세요.';
         }
       })
       .finally(function(){
