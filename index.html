@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>벨소리 편집대</title>
+<meta name="theme-color" content="#1b1815">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="벨소리 편집대">
+<link id="manifestLink" rel="manifest">
+<link id="touchIcon" rel="apple-touch-icon">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#1b1815;
+    --panel:#26221d;
+    --panel-raised:#2f2a24;
+    --stroke:#3d372f;
+    --stroke-soft:#332e27;
+    --amber:#e8954a;
+    --amber-dim:#a8703a;
+    --teal:#5fbfb3;
+    --rust:#c9634a;
+    --text:#ede7dd;
+    --text-dim:#8c8478;
+    --sans:'Space Grotesk',system-ui,-apple-system,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--sans);}
+  body{
+    min-height:100vh;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    display:flex; justify-content:center; align-items:flex-start;
+    background-image:
+      radial-gradient(ellipse at top, #221e19 0%, var(--bg) 55%),
+      repeating-linear-gradient(0deg, rgba(255,255,255,0.012) 0px, rgba(255,255,255,0.012) 1px, transparent 1px, transparent 3px);
+  }
+  button{font-family:inherit; -webkit-user-select:none; user-select:none;}
+  .device{
+    width:100%; max-width:480px;
+    padding:20px 16px 40px;
+  }
+  .device__header{
+    text-align:center; padding:18px 0 22px;
+  }
+  .badge{
+    display:inline-block;
+    font-family:var(--mono); font-size:11px; letter-spacing:.14em;
+    color:var(--amber); background:rgba(232,149,74,0.1);
+    border:1px solid var(--amber-dim); border-radius:3px;
+    padding:3px 8px; margin-bottom:12px;
+  }
+  h1{font-size:22px; font-weight:700; margin:0 0 4px; letter-spacing:-0.01em;}
+  .sub{margin:0; font-size:13px; color:var(--text-dim);}
+
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--stroke);
+    border-radius:14px;
+    padding:18px;
+    position:relative;
+    box-shadow:0 1px 0 rgba(255,255,255,0.03) inset, 0 10px 30px -12px rgba(0,0,0,0.6);
+  }
+  .panel + .panel{margin-top:14px;}
+  .rivet{position:absolute; width:5px; height:5px; border-radius:50%; background:var(--stroke-soft); box-shadow:0 1px 0 rgba(255,255,255,0.05);}
+  .rivet.tl{top:9px; left:9px;} .rivet.tr{top:9px; right:9px;}
+  .rivet.bl{bottom:9px; left:9px;} .rivet.br{bottom:9px; right:9px;}
+
+  .dropzone{text-align:center; padding:30px 16px;}
+  .btn{
+    border:none; border-radius:9px; padding:13px 20px;
+    font-size:15px; font-weight:600; cursor:pointer;
+    transition:transform .08s ease, filter .15s ease;
+    width:100%;
+  }
+  .btn:active{transform:scale(0.98);}
+  .btn--primary{background:var(--amber); color:#1b1815;}
+  .btn--primary:disabled{background:var(--stroke); color:var(--text-dim); cursor:not-allowed;}
+  .btn--ghost{background:var(--panel-raised); color:var(--text); border:1px dashed var(--stroke);}
+  .btn--outline{background:transparent; color:var(--teal); border:1px solid var(--teal);}
+  .hint{font-family:var(--mono); font-size:11px; color:var(--text-dim); margin:10px 0 0;}
+  .link-fallback{
+    display:block; margin:12px auto 0; background:none; border:none;
+    font-family:var(--mono); font-size:11px; color:var(--teal);
+    text-decoration:underline; cursor:pointer; padding:4px;
+  }
+  .filename{font-family:var(--mono); font-size:12px; color:var(--teal); margin-top:10px; word-break:break-all;}
+  .load-status{font-family:var(--mono); font-size:12px; color:var(--amber); margin-top:10px;}
+  .load-status.error{color:var(--rust);}
+
+  /* readout: like a tape counter */
+  .readout{display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:14px;}
+  .readout__item{display:flex; flex-direction:column; gap:3px;}
+  .readout__label{font-size:10px; letter-spacing:.1em; color:var(--text-dim); text-transform:uppercase;}
+  .readout__value{font-family:var(--mono); font-size:15px; color:var(--text);}
+  .readout__item--main{align-items:center;}
+  .readout__item--main .readout__value{font-size:24px; font-weight:700; color:var(--amber); font-variant-numeric:tabular-nums;}
+  .readout__item--main.over .readout__value{color:var(--rust);}
+
+  .waveform-wrap{
+    position:relative; height:96px; border-radius:8px; overflow:hidden;
+    background:var(--panel-raised); border:1px solid var(--stroke);
+  }
+  #waveform{width:100%; height:100%; display:block;}
+  .mask{position:absolute; top:0; bottom:0; background:rgba(10,9,7,0.72); pointer-events:none;}
+  .mask.left{left:0;} .mask.right{right:0;}
+  .selection-edge{position:absolute; top:0; bottom:0; width:2px; background:var(--amber); pointer-events:none;}
+  .fade-tri{position:absolute; top:0; bottom:0; pointer-events:none; opacity:.55;}
+  .fade-tri.in{background:linear-gradient(to right, rgba(95,191,179,0) , rgba(95,191,179,.45)); }
+  .fade-tri.out{background:linear-gradient(to left, rgba(201,99,74,0), rgba(201,99,74,.45));}
+  .waveform-empty{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-size:11px; color:var(--text-dim);}
+
+  .range-dual{position:relative; height:34px; margin-top:10px;}
+  .range-dual input[type=range]{
+    position:absolute; left:0; right:0; top:0; margin:0; width:100%; height:34px;
+    background:transparent; pointer-events:none; -webkit-appearance:none; appearance:none;
+  }
+  .range-dual input[type=range]::-webkit-slider-runnable-track{background:transparent; height:34px;}
+  .range-dual input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; pointer-events:auto;
+    width:14px; height:30px; border-radius:3px; margin-top:2px;
+    background:var(--amber); box-shadow:0 0 0 3px var(--bg), 0 2px 4px rgba(0,0,0,.4);
+    cursor:grab; clip-path:polygon(0 20%, 100% 0, 100% 100%, 0 80%);
+  }
+  .range-dual input#endRange::-webkit-slider-thumb{background:var(--teal);}
+  .range-dual input[type=range]::-moz-range-thumb{
+    pointer-events:auto; width:14px; height:30px; border:none; border-radius:3px;
+    background:var(--amber); cursor:grab;
+  }
+  .range-dual input#endRange::-moz-range-thumb{background:var(--teal);}
+
+  .limit-note{font-family:var(--mono); font-size:11px; color:var(--rust); min-height:14px; margin:8px 2px 0;}
+
+  .nudge-row{display:flex; gap:10px; margin-top:14px;}
+  .nudge-group{flex:1; background:var(--panel-raised); border:1px solid var(--stroke); border-radius:9px; padding:8px 10px; display:flex; align-items:center; justify-content:space-between; gap:8px;}
+  .nudge-group span{font-size:11px; color:var(--text-dim);}
+  .nudge-group button{
+    width:30px; height:30px; border-radius:6px; border:1px solid var(--stroke);
+    background:var(--bg); color:var(--text); font-size:16px; line-height:1; cursor:pointer;
+  }
+  .nudge-group button:active{background:var(--stroke);}
+
+  .fades{display:flex; flex-direction:column; gap:12px;}
+  .fade-control{display:flex; align-items:center; gap:10px;}
+  .switch{display:flex; align-items:center; gap:8px; position:relative; cursor:pointer; flex:0 0 auto;}
+  .switch input{position:absolute; opacity:0; width:0; height:0;}
+  .switch__track{
+    width:38px; height:22px; border-radius:11px; background:var(--panel-raised);
+    border:1px solid var(--stroke); position:relative; transition:background .15s;
+  }
+  .switch__track::after{
+    content:''; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%;
+    background:var(--text-dim); transition:transform .15s, background .15s;
+  }
+  .switch input:checked + .switch__track{background:rgba(95,191,179,.18); border-color:var(--teal);}
+  .switch input:checked + .switch__track::after{transform:translateX(16px); background:var(--teal);}
+  .switch__label{font-size:13px; width:80px;}
+  .fade-control input[type=range]{flex:1; accent-color:var(--amber); height:4px;}
+  .fade-control input[type=range]:disabled{opacity:.35;}
+  .fade-val{font-family:var(--mono); font-size:11px; color:var(--text-dim); width:44px; text-align:right;}
+
+  .actions{display:flex; gap:10px; margin-top:18px;}
+  .status{font-family:var(--mono); font-size:12px; color:var(--text-dim); min-height:16px; margin:10px 2px 0;}
+  .progress{height:4px; background:var(--panel-raised); border-radius:2px; overflow:hidden; margin-top:6px; display:none;}
+  .progress__bar{height:100%; width:0%; background:var(--amber); transition:width .1s linear;}
+
+  .result{margin-top:14px;}
+  .howto{margin-top:12px; background:var(--panel-raised); border:1px solid var(--stroke); border-radius:9px; padding:10px 14px;}
+  .howto summary{cursor:pointer; font-size:13px; color:var(--teal); font-weight:600;}
+  .howto ol{margin:10px 0 2px; padding-left:18px; font-size:13px; line-height:1.7; color:var(--text);}
+  .howto b{color:var(--amber);}
+
+  .footnote{text-align:center; font-family:var(--mono); font-size:10px; color:var(--text-dim); margin-top:22px; letter-spacing:.04em;}
+</style>
+</head>
+<body>
+<div class="device">
+  <div class="device__header">
+    <span class="badge">MODEL RT-30S</span>
+    <h1>벨소리 편집대</h1>
+    <p class="sub">자르고, 페이드하고, 바로 내보내요</p>
+  </div>
+
+  <div class="panel dropzone" id="dropPanel">
+    <div class="rivet tl"></div><div class="rivet tr"></div><div class="rivet bl"></div><div class="rivet br"></div>
+    <button class="btn btn--ghost" id="pickBtn">오디오 파일 선택</button>
+    <input type="file" id="fileInput" accept="audio/*,video/mp4,video/quicktime,.m4a,.mp3,.wav,.aac,.caf,.flac,.mp4" hidden>
+    <p class="hint" id="fileHint">m4a · mp3 · wav 지원 · 최대 30초 벨소리</p>
+    <button type="button" class="link-fallback" id="pickAnyBtn">파일이 회색으로 안 보이면 → 전체 파일에서 찾기</button>
+    <input type="file" id="fileInputAny" hidden>
+    <p class="filename" id="fileName"></p>
+    <p class="load-status" id="loadStatus" hidden></p>
+  </div>
+
+  <div class="panel" id="benchPanel" hidden>
+    <div class="rivet tl"></div><div class="rivet tr"></div><div class="rivet bl"></div><div class="rivet br"></div>
+
+    <div class="readout">
+      <div class="readout__item">
+        <span class="readout__label">시작</span>
+        <span class="readout__value" id="startTime">0:00.0</span>
+      </div>
+      <div class="readout__item readout__item--main" id="selItem">
+        <span class="readout__label">선택 길이</span>
+        <span class="readout__value" id="selDuration">0:00.0</span>
+      </div>
+      <div class="readout__item">
+        <span class="readout__label">끝</span>
+        <span class="readout__value" id="endTime">0:00.0</span>
+      </div>
+    </div>
+
+    <div class="waveform-wrap" id="waveformWrap">
+      <canvas id="waveform"></canvas>
+      <div class="waveform-empty" id="waveformEmpty" hidden>파형 미리보기 불가 · 슬라이더로 편집</div>
+      <div class="mask left" id="maskLeft"></div>
+      <div class="mask right" id="maskRight"></div>
+      <div class="fade-tri in" id="fadeTriIn" style="display:none;"></div>
+      <div class="fade-tri out" id="fadeTriOut" style="display:none;"></div>
+      <div class="selection-edge" id="edgeStart"></div>
+      <div class="selection-edge" id="edgeEnd"></div>
+    </div>
+
+    <div class="range-dual">
+      <input type="range" id="startRange" min="0" max="100" step="0.05" value="0">
+      <input type="range" id="endRange" min="0" max="100" step="0.05" value="30">
+    </div>
+    <p class="limit-note" id="limitNote"></p>
+
+    <div class="nudge-row">
+      <div class="nudge-group">
+        <span>시작 ±0.1s</span>
+        <button data-nudge="start" data-dir="-1">−</button>
+        <button data-nudge="start" data-dir="1">+</button>
+      </div>
+      <div class="nudge-group">
+        <span>끝 ±0.1s</span>
+        <button data-nudge="end" data-dir="-1">−</button>
+        <button data-nudge="end" data-dir="1">+</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="fadePanel" hidden>
+    <div class="rivet tl"></div><div class="rivet tr"></div><div class="rivet bl"></div><div class="rivet br"></div>
+    <div class="fades">
+      <div class="fade-control">
+        <label class="switch">
+          <input type="checkbox" id="fadeInToggle">
+          <span class="switch__track"></span>
+        </label>
+        <span class="switch__label">페이드 인</span>
+        <input type="range" id="fadeInDur" min="0.1" max="5" step="0.1" value="1" disabled>
+        <span class="fade-val" id="fadeInVal">1.0초</span>
+      </div>
+      <div class="fade-control">
+        <label class="switch">
+          <input type="checkbox" id="fadeOutToggle">
+          <span class="switch__track"></span>
+        </label>
+        <span class="switch__label">페이드 아웃</span>
+        <input type="range" id="fadeOutDur" min="0.1" max="5" step="0.1" value="1" disabled>
+        <span class="fade-val" id="fadeOutVal">1.0초</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="actionPanel" hidden>
+    <div class="rivet tl"></div><div class="rivet tr"></div><div class="rivet bl"></div><div class="rivet br"></div>
+    <div class="actions">
+      <button class="btn btn--outline" id="previewBtn">▶ 미리듣기</button>
+      <button class="btn btn--primary" id="generateBtn">벨소리 파일 만들기</button>
+    </div>
+    <p class="status" id="status"></p>
+    <div class="progress" id="progressWrap"><div class="progress__bar" id="progressBar"></div></div>
+
+    <div class="result" id="result" hidden>
+      <a class="btn btn--primary" id="downloadLink" download>⬇ 다운로드</a>
+      <details class="howto">
+        <summary>다음 단계 · 아이폰에 벨소리로 등록하기</summary>
+        <ol>
+          <li>다운로드한 <b>.m4r</b> 파일을 길게 눌러 <b>GarageBand로 복사</b>를 선택해요.</li>
+          <li>GarageBand에서 왼쪽 위로 나가 <b>내 노래</b>로 저장한 뒤, 길게 눌러 <b>공유 → 벨소리</b>를 선택해요.</li>
+          <li>이름을 정하고 내보내기 → <b>사운드로 사용</b>을 누르면 등록 완료예요.</li>
+          <li>설정 → 사운드 및 햅틱 → 벨소리에서 방금 만든 벨소리를 선택할 수 있어요.</li>
+        </ol>
+      </details>
+    </div>
+  </div>
+
+  <p class="footnote">전부 기기 안에서 처리돼요 · 서버 업로드 없음</p>
+</div>
+
+<audio id="previewAudioEl" hidden></audio>
+
+<script>
+(function(){
+  'use strict';
+
+  // ---------- PWA shell: manifest + icon (inline, single-file) ----------
+  try {
+    var iconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180"><rect width="180" height="180" rx="34" fill="#26221d"/><path d="M0 130 L130 0 L180 0 L180 20 L20 180 L0 180 Z" fill="#e8954a" opacity="0.85"/><g fill="#5fbfb3"><rect x="46" y="96" width="10" height="40" rx="3"/><rect x="66" y="76" width="10" height="60" rx="3"/><rect x="86" y="56" width="10" height="80" rx="3"/><rect x="106" y="86" width="10" height="50" rx="3"/><rect x="126" y="66" width="10" height="70" rx="3"/></g></svg>';
+    document.getElementById('touchIcon').href = 'data:image/svg+xml,' + encodeURIComponent(iconSvg);
+
+    var manifest = {
+      name: '벨소리 편집대', short_name: '벨소리편집대',
+      start_url: './', display: 'standalone',
+      background_color: '#1b1815', theme_color: '#1b1815',
+      icons: [{ src: 'data:image/svg+xml,' + encodeURIComponent(iconSvg), sizes: '180x180', type: 'image/svg+xml' }]
+    };
+    var mBlob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+    document.getElementById('manifestLink').href = URL.createObjectURL(mBlob);
+  } catch (e) { /* non-critical */ }
+
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    try {
+      var swSrc = "self.addEventListener('install', e => self.skipWaiting()); " +
+                  "self.addEventListener('activate', e => self.clients.claim()); " +
+                  "self.addEventListener('fetch', e => { " +
+                  "  if (e.request.mode === 'navigate') { " +
+                  "    e.respondWith(fetch(e.request).catch(() => caches.match(e.request))); " +
+                  "  } " +
+                  "});";
+      var swBlob = new Blob([swSrc], { type: 'text/javascript' });
+      navigator.serviceWorker.register(URL.createObjectURL(swBlob));
+    } catch (e) { /* non-critical */ }
+  }
+
+  // ---------- Elements ----------
+  var pickBtn = document.getElementById('pickBtn');
+  var fileInput = document.getElementById('fileInput');
+  var fileName = document.getElementById('fileName');
+  var previewAudioEl = document.getElementById('previewAudioEl');
+  var benchPanel = document.getElementById('benchPanel');
+  var fadePanel = document.getElementById('fadePanel');
+  var actionPanel = document.getElementById('actionPanel');
+
+  var startRange = document.getElementById('startRange');
+  var endRange = document.getElementById('endRange');
+  var startTimeEl = document.getElementById('startTime');
+  var endTimeEl = document.getElementById('endTime');
+  var selDurationEl = document.getElementById('selDuration');
+  var selItem = document.getElementById('selItem');
+  var limitNote = document.getElementById('limitNote');
+
+  var waveformCanvas = document.getElementById('waveform');
+  var waveformEmpty = document.getElementById('waveformEmpty');
+  var maskLeft = document.getElementById('maskLeft');
+  var maskRight = document.getElementById('maskRight');
+  var edgeStart = document.getElementById('edgeStart');
+  var edgeEnd = document.getElementById('edgeEnd');
+  var fadeTriIn = document.getElementById('fadeTriIn');
+  var fadeTriOut = document.getElementById('fadeTriOut');
+
+  var fadeInToggle = document.getElementById('fadeInToggle');
+  var fadeOutToggle = document.getElementById('fadeOutToggle');
+  var fadeInDur = document.getElementById('fadeInDur');
+  var fadeOutDur = document.getElementById('fadeOutDur');
+  var fadeInVal = document.getElementById('fadeInVal');
+  var fadeOutVal = document.getElementById('fadeOutVal');
+
+  var previewBtn = document.getElementById('previewBtn');
+  var generateBtn = document.getElementById('generateBtn');
+  var statusEl = document.getElementById('status');
+  var progressWrap = document.getElementById('progressWrap');
+  var progressBar = document.getElementById('progressBar');
+  var resultEl = document.getElementById('result');
+  var downloadLink = document.getElementById('downloadLink');
+
+  var MAX_LEN = 30;
+  var MIN_LEN = 1;
+
+  var state = {
+    file: null,
+    duration: 0,
+    audioBuffer: null,   // decoded, for waveform only (best-effort, bounded by size)
+    peaks: null,
+    start: 0,
+    end: 0,
+    isPlaying: false,
+    currentObjectUrl: null,
+    mediaSource: null,
+    previewGain: null,
+    previewTimer: null,
+    previewMode: 'none'   // 'element' (normal) or 'buffer' (fallback when <audio> rejects the file)
+  };
+
+  var audioCtx = null;
+
+  // ---------- Helpers ----------
+  function fmt(t){
+    t = Math.max(0, t);
+    var m = Math.floor(t/60);
+    var s = t - m*60;
+    return m + ':' + (s < 10 ? '0' : '') + s.toFixed(1);
+  }
+
+  function pctFor(t){
+    return state.duration > 0 ? (t / state.duration) * 100 : 0;
+  }
+
+  function clamp(v, lo, hi){ return Math.min(hi, Math.max(lo, v)); }
+
+  // ---------- File loading ----------
+  var pickAnyBtn = document.getElementById('pickAnyBtn');
+  var fileInputAny = document.getElementById('fileInputAny');
+
+  pickBtn.addEventListener('click', function(){ fileInput.click(); });
+  pickAnyBtn.addEventListener('click', function(){ fileInputAny.click(); });
+
+  fileInput.addEventListener('change', function(e){
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    loadFile(f);
+  });
+
+  // Unrestricted picker: no accept filter at all, so iOS can never gray out
+  // audio files here regardless of how it misjudges their type (see: known
+  // WebKit accept="audio/*" bug with m4a/MP4-family files).
+  fileInputAny.addEventListener('change', function(e){
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    loadFile(f);
+  });
+
+  function guessMime(filename){
+    var ext = (filename.split('.').pop() || '').toLowerCase();
+    var map = {
+      m4a: 'audio/mp4', m4r: 'audio/mp4', mp4: 'audio/mp4',
+      mp3: 'audio/mpeg', wav: 'audio/wav', aac: 'audio/aac',
+      caf: 'audio/x-caf', flac: 'audio/flac', ogg: 'audio/ogg'
+    };
+    return map[ext] || '';
+  }
+
+  function loadFile(f){
+    state.file = f;
+    fileName.textContent = f.name;
+    resultEl.hidden = true;
+    benchPanel.hidden = true;
+    fadePanel.hidden = true;
+    actionPanel.hidden = true;
+    state.previewMode = 'none';
+    state.audioBuffer = null;
+    state.peaks = null;
+
+    var loadStatus = document.getElementById('loadStatus');
+    loadStatus.hidden = false;
+    loadStatus.classList.remove('error');
+    loadStatus.textContent = '분석 중...';
+
+    if (state.currentObjectUrl) URL.revokeObjectURL(state.currentObjectUrl);
+
+    // iOS often reports an empty/incorrect File.type for files picked via an
+    // unrestricted <input>, which makes <audio> reject a perfectly valid m4a.
+    // Force the correct MIME type ourselves based on the extension.
+    var mime = guessMime(f.name) || f.type || '';
+    var playableBlob = mime ? new Blob([f], { type: mime }) : f;
+    var objUrl = URL.createObjectURL(playableBlob);
+    state.currentObjectUrl = objUrl;
+
+    var settled = false;
+
+    function succeedWithElement(d){
+      settled = true;
+      clearTimeout(timer);
+      state.duration = d;
+      state.previewMode = 'element';
+      loadStatus.hidden = true;
+      setupBench();
+      maybeDecodeWaveform(f);
+    }
+
+    function tryDecodeFallback(){
+      loadStatus.textContent = '다른 방식으로 다시 확인하는 중...';
+      f.arrayBuffer().then(function(buf){
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        return audioCtx.decodeAudioData(buf.slice(0));
+      }).then(function(decoded){
+        if (settled) return;
+        settled = true;
+        state.duration = decoded.duration;
+        state.audioBuffer = decoded;
+        state.peaks = computePeaks(decoded, 320);
+        state.previewMode = 'buffer';
+        loadStatus.hidden = true;
+        setupBench();
+        drawWaveform();
+      }).catch(function(){
+        if (settled) return;
+        settled = true;
+        loadStatus.classList.add('error');
+        loadStatus.textContent = '이 파일은 재생할 수 없어요 (손상되었거나 DRM 보호된 파일일 수 있어요). 다른 파일을 시도해보세요.';
+      });
+    }
+
+    function onReady(){
+      if (settled) return;
+      var d = previewAudioEl.duration;
+      if (!isFinite(d) || d <= 0) return; // wait for a real value
+      succeedWithElement(d);
+    }
+
+    previewAudioEl.pause();
+    previewAudioEl.removeAttribute('src');
+    previewAudioEl.addEventListener('loadedmetadata', onReady, { once: true });
+    previewAudioEl.addEventListener('durationchange', onReady, { once: true });
+    previewAudioEl.addEventListener('error', function(){
+      if (settled) return;
+      clearTimeout(timer);
+      tryDecodeFallback();
+    }, { once: true });
+
+    var timer = setTimeout(function(){
+      if (settled) return;
+      tryDecodeFallback();
+    }, 8000);
+
+    previewAudioEl.src = objUrl;
+    previewAudioEl.load();
+  }
+
+  function setupBench(){
+    benchPanel.hidden = false;
+    fadePanel.hidden = false;
+    actionPanel.hidden = false;
+
+    startRange.min = 0; startRange.max = state.duration; startRange.step = 0.05;
+    endRange.min = 0; endRange.max = state.duration; endRange.step = 0.05;
+
+    state.start = 0;
+    state.end = Math.min(MAX_LEN, state.duration);
+    startRange.value = state.start;
+    endRange.value = state.end;
+
+    resizeCanvas();
+    drawWaveform();
+    updateSelectionUI();
+  }
+
+  // ---------- Waveform decode (best-effort, bounded) ----------
+  var WAVEFORM_MAX_BYTES = 25 * 1024 * 1024; // ~skip full decode beyond this; long mixes still work, just no waveform art
+
+  function maybeDecodeWaveform(f){
+    if (f.size > WAVEFORM_MAX_BYTES){
+      state.audioBuffer = null;
+      state.peaks = null;
+      waveformEmpty.hidden = false;
+      waveformEmpty.textContent = '파일이 길어 파형 미리보기를 생략해요 · 편집은 정상 동작해요';
+      return;
+    }
+    waveformEmpty.hidden = true;
+    f.arrayBuffer().then(function(buf){
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      return audioCtx.decodeAudioData(buf.slice(0));
+    }).then(function(decoded){
+      state.audioBuffer = decoded;
+      state.peaks = computePeaks(decoded, 320);
+      drawWaveform();
+    }).catch(function(){
+      state.audioBuffer = null;
+      state.peaks = null;
+      waveformEmpty.hidden = false;
+      waveformEmpty.textContent = '파형 미리보기 불가 · 편집은 정상 동작해요';
+    });
+  }
+
+  function computePeaks(buffer, bucketCount){
+    var data = buffer.getChannelData(0);
+    var samplesPerBucket = Math.floor(data.length / bucketCount);
+    var peaks = new Float32Array(bucketCount);
+    for (var i = 0; i < bucketCount; i++){
+      var start = i * samplesPerBucket;
+      var max = 0;
+      for (var j = 0; j < samplesPerBucket; j++){
+        var v = Math.abs(data[start + j] || 0);
+        if (v > max) max = v;
+      }
+      peaks[i] = max;
+    }
+    return peaks;
+  }
+
+  function resizeCanvas(){
+    var wrap = document.getElementById('waveformWrap');
+    var dpr = window.devicePixelRatio || 1;
+    var w = wrap.clientWidth, h = wrap.clientHeight;
+    waveformCanvas.width = w * dpr;
+    waveformCanvas.height = h * dpr;
+    waveformCanvas.style.width = w + 'px';
+    waveformCanvas.style.height = h + 'px';
+  }
+
+  function drawWaveform(){
+    var ctx = waveformCanvas.getContext('2d');
+    var dpr = window.devicePixelRatio || 1;
+    var w = waveformCanvas.width, h = waveformCanvas.height;
+    ctx.clearRect(0,0,w,h);
+
+    if (!state.peaks){
+      // flat placeholder line
+      ctx.strokeStyle = '#3d372f';
+      ctx.lineWidth = 2 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(0, h/2); ctx.lineTo(w, h/2);
+      ctx.stroke();
+      return;
+    }
+
+    var n = state.peaks.length;
+    var barW = w / n;
+    ctx.fillStyle = '#5fbfb3';
+    for (var i = 0; i < n; i++){
+      var mag = state.peaks[i];
+      var barH = Math.max(2*dpr, mag * h * 0.9);
+      var x = i * barW;
+      var y = (h - barH) / 2;
+      ctx.fillRect(x, y, Math.max(1, barW - 1*dpr), barH);
+    }
+  }
+
+  // ---------- Selection UI ----------
+  function updateSelectionUI(){
+    var startPct = pctFor(state.start);
+    var endPct = pctFor(state.end);
+
+    maskLeft.style.width = startPct + '%';
+    maskRight.style.width = (100 - endPct) + '%';
+    edgeStart.style.left = startPct + '%';
+    edgeEnd.style.left = endPct + '%';
+
+    startTimeEl.textContent = fmt(state.start);
+    endTimeEl.textContent = fmt(state.end);
+    var selDur = state.end - state.start;
+    selDurationEl.textContent = fmt(selDur);
+    selItem.classList.toggle('over', selDur > MAX_LEN + 0.01);
+
+    limitNote.textContent = selDur > MAX_LEN
+      ? '⚠ 아이폰 벨소리는 최대 30초까지만 등록돼요'
+      : '';
+
+    updateFadeGeometry();
+    updateFadeConstraints();
+  }
+
+  function updateFadeGeometry(){
+    var selDur = state.end - state.start;
+    var startPct = pctFor(state.start);
+    var endPct = pctFor(state.end);
+    var selWidthPct = endPct - startPct;
+
+    if (fadeInToggle.checked && selDur > 0){
+      var inDur = parseFloat(fadeInDur.value);
+      var inWidthPct = selWidthPct * (inDur / selDur);
+      fadeTriIn.style.display = 'block';
+      fadeTriIn.style.left = startPct + '%';
+      fadeTriIn.style.width = inWidthPct + '%';
+    } else {
+      fadeTriIn.style.display = 'none';
+    }
+
+    if (fadeOutToggle.checked && selDur > 0){
+      var outDur = parseFloat(fadeOutDur.value);
+      var outWidthPct = selWidthPct * (outDur / selDur);
+      fadeTriOut.style.display = 'block';
+      fadeTriOut.style.left = (endPct - outWidthPct) + '%';
+      fadeTriOut.style.width = outWidthPct + '%';
+    } else {
+      fadeTriOut.style.display = 'none';
+    }
+  }
+
+  function updateFadeConstraints(){
+    var selDur = Math.max(0.2, state.end - state.start);
+    var maxFade = Math.max(0.1, Math.min(5, selDur / 2));
+    fadeInDur.max = maxFade.toFixed(1);
+    fadeOutDur.max = maxFade.toFixed(1);
+    if (parseFloat(fadeInDur.value) > maxFade){ fadeInDur.value = maxFade.toFixed(1); }
+    if (parseFloat(fadeOutDur.value) > maxFade){ fadeOutDur.value = maxFade.toFixed(1); }
+    fadeInVal.textContent = parseFloat(fadeInDur.value).toFixed(1) + '초';
+    fadeOutVal.textContent = parseFloat(fadeOutDur.value).toFixed(1) + '초';
+  }
+
+  // ---------- Range dual-handle logic ----------
+  startRange.addEventListener('input', function(){
+    var s = parseFloat(startRange.value);
+    var e = state.end;
+    if (e - s > MAX_LEN) e = s + MAX_LEN;
+    if (e - s < MIN_LEN) e = s + MIN_LEN;
+    if (e > state.duration) { e = state.duration; s = Math.max(0, e - MIN_LEN); startRange.value = s; }
+    if (s < 0) s = 0;
+    state.start = s; state.end = e;
+    endRange.value = e;
+    updateSelectionUI();
+  });
+
+  endRange.addEventListener('input', function(){
+    var e = parseFloat(endRange.value);
+    var s = state.start;
+    if (e - s > MAX_LEN) s = e - MAX_LEN;
+    if (e - s < MIN_LEN) s = e - MIN_LEN;
+    if (s < 0) { s = 0; e = Math.min(state.duration, MIN_LEN); endRange.value = e; }
+    if (e > state.duration) e = state.duration;
+    state.start = s; state.end = e;
+    startRange.value = s;
+    updateSelectionUI();
+  });
+
+  document.querySelectorAll('[data-nudge]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var which = btn.getAttribute('data-nudge');
+      var dir = parseFloat(btn.getAttribute('data-dir'));
+      var delta = 0.1 * dir;
+      if (which === 'start'){
+        var s = clamp(state.start + delta, 0, state.end - MIN_LEN);
+        state.start = s; startRange.value = s;
+      } else {
+        var e = clamp(state.end + delta, state.start + MIN_LEN, state.duration);
+        state.end = e; endRange.value = e;
+      }
+      updateSelectionUI();
+    });
+  });
+
+  window.addEventListener('resize', function(){
+    if (!benchPanel.hidden){ resizeCanvas(); drawWaveform(); }
+  });
+
+  // ---------- Fade controls ----------
+  fadeInToggle.addEventListener('change', function(){
+    fadeInDur.disabled = !fadeInToggle.checked;
+    updateSelectionUI();
+  });
+  fadeOutToggle.addEventListener('change', function(){
+    fadeOutDur.disabled = !fadeOutToggle.checked;
+    updateSelectionUI();
+  });
+  fadeInDur.addEventListener('input', updateSelectionUI);
+  fadeOutDur.addEventListener('input', updateSelectionUI);
+
+  // ---------- Preview playback ----------
+  previewBtn.addEventListener('click', function(){
+    if (state.isPlaying){ stopPreview(); return; }
+    if (state.previewMode === 'buffer') playPreviewBuffer();
+    else playPreviewElement();
+  });
+
+  function ensureMediaSource(){
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!state.mediaSource){
+      state.mediaSource = audioCtx.createMediaElementSource(previewAudioEl);
+      state.previewGain = audioCtx.createGain();
+      state.mediaSource.connect(state.previewGain);
+      state.previewGain.connect(audioCtx.destination);
+    }
+  }
+
+  function playPreviewElement(){
+    if (!state.file) return;
+    ensureMediaSource();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    var selDur = state.end - state.start;
+    if (selDur <= 0) return;
+
+    try { previewAudioEl.currentTime = state.start; } catch(e){}
+
+    var fadeIn = fadeInToggle.checked ? parseFloat(fadeInDur.value) : 0;
+    var fadeOut = fadeOutToggle.checked ? parseFloat(fadeOutDur.value) : 0;
+
+    var playPromise = previewAudioEl.play();
+    if (playPromise && playPromise.then){
+      playPromise.then(function(){ scheduleFadeGain(state.previewGain, fadeIn, fadeOut, selDur); }).catch(function(){
+        setPlayingUI(false);
+      });
+    } else {
+      scheduleFadeGain(state.previewGain, fadeIn, fadeOut, selDur);
+    }
+
+    clearTimeout(state.previewTimer);
+    state.previewTimer = setTimeout(function(){
+      previewAudioEl.pause();
+      setPlayingUI(false);
+    }, selDur * 1000);
+
+    setPlayingUI(true);
+  }
+
+  var bufferSource = null;
+
+  function playPreviewBuffer(){
+    if (!state.audioBuffer) return;
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    var selDur = state.end - state.start;
+    if (selDur <= 0) return;
+
+    bufferSource = audioCtx.createBufferSource();
+    bufferSource.buffer = state.audioBuffer;
+    var gainNode = audioCtx.createGain();
+    bufferSource.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    var fadeIn = fadeInToggle.checked ? parseFloat(fadeInDur.value) : 0;
+    var fadeOut = fadeOutToggle.checked ? parseFloat(fadeOutDur.value) : 0;
+    scheduleFadeGain(gainNode, fadeIn, fadeOut, selDur);
+
+    bufferSource.start(audioCtx.currentTime, state.start, selDur);
+    bufferSource.onended = function(){ setPlayingUI(false); };
+    setPlayingUI(true);
+  }
+
+  function scheduleFadeGain(gainNode, fadeIn, fadeOut, selDur){
+    var now = audioCtx.currentTime;
+    gainNode.gain.cancelScheduledValues(now);
+    if (fadeIn > 0){
+      gainNode.gain.setValueAtTime(0, now);
+      gainNode.gain.linearRampToValueAtTime(1, now + fadeIn);
+    } else {
+      gainNode.gain.setValueAtTime(1, now);
+    }
+    if (fadeOut > 0){
+      var outAt = now + selDur - fadeOut;
+      gainNode.gain.setValueAtTime(1, Math.max(now, outAt));
+      gainNode.gain.linearRampToValueAtTime(0, now + selDur);
+    }
+  }
+
+  function stopPreview(){
+    clearTimeout(state.previewTimer);
+    previewAudioEl.pause();
+    if (bufferSource){
+      try { bufferSource.stop(); } catch(e){}
+      bufferSource = null;
+    }
+    setPlayingUI(false);
+  }
+
+  function setPlayingUI(playing){
+    state.isPlaying = playing;
+    previewBtn.textContent = playing ? '■ 정지' : '▶ 미리듣기';
+  }
+
+  // ---------- Export ----------
+  var ffmpegInstance = null;
+
+  function withTimeout(promise, ms, tag){
+    return new Promise(function(resolve, reject){
+      var timer = setTimeout(function(){ reject(new Error(tag)); }, ms);
+      promise.then(
+        function(v){ clearTimeout(timer); resolve(v); },
+        function(e){ clearTimeout(timer); reject(e); }
+      );
+    });
+  }
+
+  function loadFFmpeg(onLog){
+    if (ffmpegInstance) return Promise.resolve(ffmpegInstance);
+    return Promise.all([
+      import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js'),
+      import('https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/esm/index.js')
+    ]).then(function(mods){
+      var FFmpeg = mods[0].FFmpeg;
+      var toBlobURL = mods[1].toBlobURL;
+      var ffmpeg = new FFmpeg();
+      ffmpeg.on('log', function(l){ if (onLog) onLog(l.message); });
+      var baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm';
+      return Promise.all([
+        toBlobURL(baseURL + '/ffmpeg-core.js', 'text/javascript'),
+        toBlobURL(baseURL + '/ffmpeg-core.wasm', 'application/wasm')
+      ]).then(function(urls){
+        return ffmpeg.load({ coreURL: urls[0], wasmURL: urls[1] });
+      }).then(function(){
+        ffmpegInstance = ffmpeg;
+        return ffmpeg;
+      });
+    });
+  }
+
+  function sanitizeBaseName(name){
+    var base = name.replace(/\.[^/.]+$/, '');
+    base = base.replace(/[^a-zA-Z0-9가-힣_-]+/g, '_');
+    return base || 'ringtone';
+  }
+
+  generateBtn.addEventListener('click', function(){
+    stopPreview();
+    resultEl.hidden = true;
+    generateBtn.disabled = true;
+    previewBtn.disabled = true;
+
+    var start = state.start, end = state.end;
+    var selDur = end - start;
+    if (selDur > MAX_LEN) end = start + MAX_LEN;
+    selDur = end - start;
+
+    var needsTrim = !(Math.abs(start) < 0.02 && Math.abs(end - state.duration) < 0.02);
+    var needsFade = fadeInToggle.checked || fadeOutToggle.checked;
+    var outName = sanitizeBaseName(state.file.name) + '.m4r';
+
+    if (!needsTrim && !needsFade){
+      // bit-perfect fast path: no processing needed at all
+      statusEl.textContent = '원본 그대로 사용 (재인코딩 없음)';
+      finishDownload(state.file, outName);
+      return;
+    }
+
+    var ext = (state.file.name.split('.').pop() || 'm4a').toLowerCase();
+    var inputName = 'input.' + ext;
+    var outputName = 'output.m4a';
+
+    statusEl.textContent = '엔진을 불러오는 중... (최초 1회, 인터넷 필요)';
+    progressWrap.style.display = 'block';
+    progressBar.style.width = '0%';
+
+    withTimeout(loadFFmpeg(), 20000, 'FFMPEG_LOAD_TIMEOUT')
+      .then(function(ffmpeg){
+        ffmpeg.on('progress', function(p){
+          var pct = clamp((p.progress || 0) * 100, 0, 100);
+          progressBar.style.width = pct + '%';
+        });
+
+        statusEl.textContent = '파일 불러오는 중...';
+        return state.file.arrayBuffer().then(function(buf){
+          return ffmpeg.writeFile(inputName, new Uint8Array(buf));
+        }).then(function(){
+          var args = ['-ss', String(start), '-i', inputName, '-t', String(selDur)];
+
+          if (needsFade){
+            var filters = [];
+            if (fadeInToggle.checked){
+              filters.push('afade=t=in:st=0:d=' + parseFloat(fadeInDur.value).toFixed(2));
+            }
+            if (fadeOutToggle.checked){
+              var outStart = Math.max(0, selDur - parseFloat(fadeOutDur.value));
+              filters.push('afade=t=out:st=' + outStart.toFixed(2) + ':d=' + parseFloat(fadeOutDur.value).toFixed(2));
+            }
+            statusEl.textContent = '페이드 적용 중 (고음질 재인코딩, 256kbps)...';
+            args = args.concat(['-af', filters.join(','), '-c:a', 'aac', '-b:a', '256k', '-ar', '44100', outputName]);
+          } else {
+            statusEl.textContent = '무손실로 자르는 중...';
+            args = args.concat(['-c', 'copy', outputName]);
+          }
+
+          return ffmpeg.exec(args);
+        }).then(function(){
+          return ffmpeg.readFile(outputName);
+        }).then(function(data){
+          var blob = new Blob([data.buffer], { type: 'audio/mp4' });
+          progressWrap.style.display = 'none';
+          statusEl.textContent = '완료!';
+          finishDownload(blob, outName);
+          return Promise.all([
+            ffmpeg.deleteFile(inputName).catch(function(){}),
+            ffmpeg.deleteFile(outputName).catch(function(){})
+          ]);
+        });
+      })
+      .catch(function(err){
+        console.error(err);
+        progressWrap.style.display = 'none';
+        if (err && err.message === 'FFMPEG_LOAD_TIMEOUT'){
+          statusEl.textContent = '엔진을 불러오지 못했어요. 채팅 안 미리보기라면 이 파일을 GitHub Pages 등에 올리거나 Safari에서 직접 열어 다시 시도해보세요.';
+        } else {
+          statusEl.textContent = '처리 중 문제가 발생했어요. 인터넷 연결을 확인하고 다시 시도해보세요.';
+        }
+      })
+      .finally(function(){
+        generateBtn.disabled = false;
+        previewBtn.disabled = false;
+      });
+  });
+
+  function finishDownload(blobOrFile, outName){
+    var url = URL.createObjectURL(blobOrFile);
+    downloadLink.href = url;
+    downloadLink.setAttribute('download', outName);
+    resultEl.hidden = false;
+    resultEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+})();
+</script>
+</body>
+</html>
