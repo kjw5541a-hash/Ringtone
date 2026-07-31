@@ -317,17 +317,7 @@
   } catch (e) { /* non-critical */ }
 
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
-    try {
-      var swSrc = "self.addEventListener('install', e => self.skipWaiting()); " +
-                  "self.addEventListener('activate', e => self.clients.claim()); " +
-                  "self.addEventListener('fetch', e => { " +
-                  "  if (e.request.mode === 'navigate') { " +
-                  "    e.respondWith(fetch(e.request).catch(() => caches.match(e.request))); " +
-                  "  } " +
-                  "});";
-      var swBlob = new Blob([swSrc], { type: 'text/javascript' });
-      navigator.serviceWorker.register(URL.createObjectURL(swBlob));
-    } catch (e) { /* non-critical */ }
+    navigator.serviceWorker.register('./sw.js').catch(function(){ /* non-critical */ });
   }
 
   // ---------- Elements ----------
@@ -848,6 +838,10 @@
 
   // ---------- Export ----------
   var ffmpegInstance = null;
+  var LOCAL_CORE_BASE = './ffmpeg-core';
+  var CDN_CORE_BASE = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm';
+  var STALL_LIMIT_MS = 15000;   // fail only if NO new bytes arrive for this long
+  var INIT_TIMEOUT_MS = 15000;  // worker/wasm init after bytes are already local
 
   function withTimeout(promise, ms, tag){
     return new Promise(function(resolve, reject){
@@ -859,33 +853,120 @@
     });
   }
 
-  function loadFFmpeg(onLog){
-    if (ffmpegInstance) return Promise.resolve(ffmpegInstance);
-    return Promise.all([
-      import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js'),
-      import('https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/esm/index.js')
-    ]).then(function(mods){
-      var FFmpeg = mods[0].FFmpeg;
-      var toBlobURL = mods[1].toBlobURL;
-      var ffmpeg = new FFmpeg();
-      ffmpeg.on('log', function(l){ if (onLog) onLog(l.message); });
-      var baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm';
-      return Promise.all([
-        toBlobURL(baseURL + '/ffmpeg-core.js', 'text/javascript'),
-        toBlobURL(baseURL + '/ffmpeg-core.wasm', 'application/wasm')
-      ]).then(function(urls){
-        return ffmpeg.load({ coreURL: urls[0], wasmURL: urls[1] });
-      }).then(function(){
-        ffmpegInstance = ffmpeg;
-        return ffmpeg;
-      });
+  // Fetches a URL while reporting real byte progress, so slow-but-moving
+  // downloads are never confused with a genuinely stalled connection.
+  function fetchWithProgress(url, mimeType, onProgress, signal){
+    return fetch(url, { signal: signal }).then(function(resp){
+      if (!resp.ok) throw new Error('HTTP ' + resp.status + ' for ' + url);
+      var total = parseInt(resp.headers.get('Content-Length') || '0', 10);
+      var loaded = 0;
+      var reader = resp.body.getReader();
+      var chunks = [];
+      function pump(){
+        return reader.read().then(function(result){
+          if (result.done){
+            return URL.createObjectURL(new Blob(chunks, { type: mimeType }));
+          }
+          chunks.push(result.value);
+          loaded += result.value.byteLength;
+          if (onProgress) onProgress(loaded, total);
+          return pump();
+        });
+      }
+      return pump();
     });
+  }
+
+  // Prefer a same-origin copy of the engine (fast, no CDN dependency) if the
+  // repo ships one at ./ffmpeg-core/; otherwise fall back to jsdelivr.
+  function resolveCoreBase(){
+    return fetch(LOCAL_CORE_BASE + '/ffmpeg-core.js', { method: 'HEAD' })
+      .then(function(resp){ return resp.ok ? LOCAL_CORE_BASE : CDN_CORE_BASE; })
+      .catch(function(){ return CDN_CORE_BASE; });
+  }
+
+  function loadFFmpeg(onProgress){
+    if (ffmpegInstance) return Promise.resolve(ffmpegInstance);
+
+    return import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js')
+      .then(function(mod){
+        var ffmpeg = new mod.FFmpeg();
+        return resolveCoreBase().then(function(baseURL){
+          var loadedBytes = { js: 0, wasm: 0 };
+          var totalBytes = { js: 0, wasm: 0 };
+          var lastProgressAt = Date.now();
+          var controller = new AbortController();
+
+          var stallWatcher = setInterval(function(){
+            if (Date.now() - lastProgressAt > STALL_LIMIT_MS){
+              clearInterval(stallWatcher);
+              controller.abort();
+            }
+          }, 1000);
+
+          function reportProgress(){
+            lastProgressAt = Date.now();
+            var loaded = loadedBytes.js + loadedBytes.wasm;
+            var total = totalBytes.js + totalBytes.wasm;
+            if (onProgress) onProgress(loaded, total);
+          }
+
+          var jsPromise = fetchWithProgress(baseURL + '/ffmpeg-core.js', 'text/javascript', function(l, t){
+            loadedBytes.js = l; totalBytes.js = t; reportProgress();
+          }, controller.signal);
+
+          var wasmPromise = fetchWithProgress(baseURL + '/ffmpeg-core.wasm', 'application/wasm', function(l, t){
+            loadedBytes.wasm = l; totalBytes.wasm = t; reportProgress();
+          }, controller.signal);
+
+          return Promise.all([jsPromise, wasmPromise])
+            .then(function(urls){
+              clearInterval(stallWatcher);
+              if (onProgress) onProgress(-1, -1); // signal "initializing" phase
+              return withTimeout(
+                ffmpeg.load({ coreURL: urls[0], wasmURL: urls[1] }),
+                INIT_TIMEOUT_MS,
+                'FFMPEG_INIT_TIMEOUT'
+              );
+            })
+            .then(function(){
+              ffmpegInstance = ffmpeg;
+              return ffmpeg;
+            })
+            .catch(function(err){
+              clearInterval(stallWatcher);
+              if (err && err.name === 'AbortError'){
+                throw new Error('FFMPEG_STALLED');
+              }
+              throw err;
+            });
+        });
+      });
   }
 
   function sanitizeBaseName(name){
     var base = name.replace(/\.[^/.]+$/, '');
     base = base.replace(/[^a-zA-Z0-9가-힣_-]+/g, '_');
     return base || 'ringtone';
+  }
+
+  function formatMB(bytes){
+    return (bytes / 1024 / 1024).toFixed(1);
+  }
+
+  function showEngineProgress(loaded, total){
+    if (loaded < 0){
+      progressBar.style.width = '100%';
+      statusEl.textContent = '엔진 초기화 중...';
+      return;
+    }
+    if (total > 0){
+      var pct = clamp((loaded / total) * 100, 0, 100);
+      progressBar.style.width = pct + '%';
+      statusEl.textContent = '엔진 받는 중... ' + formatMB(loaded) + 'MB / ' + formatMB(total) + 'MB (' + pct.toFixed(0) + '%)';
+    } else {
+      statusEl.textContent = '엔진 받는 중... ' + formatMB(loaded) + 'MB';
+    }
   }
 
   generateBtn.addEventListener('click', function(){
@@ -907,6 +988,8 @@
       // bit-perfect fast path: no processing needed at all
       statusEl.textContent = '원본 그대로 사용 (재인코딩 없음)';
       finishDownload(state.file, outName);
+      generateBtn.disabled = false;
+      previewBtn.disabled = false;
       return;
     }
 
@@ -914,11 +997,11 @@
     var inputName = 'input.' + ext;
     var outputName = 'output.m4a';
 
-    statusEl.textContent = '엔진을 불러오는 중... (최초 1회, 인터넷 필요)';
+    statusEl.textContent = '엔진 확인 중...';
     progressWrap.style.display = 'block';
     progressBar.style.width = '0%';
 
-    withTimeout(loadFFmpeg(), 20000, 'FFMPEG_LOAD_TIMEOUT')
+    loadFFmpeg(showEngineProgress)
       .then(function(ffmpeg){
         ffmpeg.on('progress', function(p){
           var pct = clamp((p.progress || 0) * 100, 0, 100);
@@ -964,8 +1047,10 @@
       .catch(function(err){
         console.error(err);
         progressWrap.style.display = 'none';
-        if (err && err.message === 'FFMPEG_LOAD_TIMEOUT'){
-          statusEl.textContent = '엔진을 불러오지 못했어요. 채팅 안 미리보기라면 이 파일을 GitHub Pages 등에 올리거나 Safari에서 직접 열어 다시 시도해보세요.';
+        if (err && err.message === 'FFMPEG_STALLED'){
+          statusEl.textContent = '다운로드가 멈췄어요 (15초간 진행 없음). 네트워크 상태를 확인하고 다시 시도해보세요.';
+        } else if (err && err.message === 'FFMPEG_INIT_TIMEOUT'){
+          statusEl.textContent = '엔진 초기화가 오래 걸려요. 다시 시도해보세요.';
         } else {
           statusEl.textContent = '처리 중 문제가 발생했어요. 인터넷 연결을 확인하고 다시 시도해보세요.';
         }
