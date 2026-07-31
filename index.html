@@ -841,7 +841,7 @@
   var LOCAL_CORE_BASE = './ffmpeg-core';
   var CDN_CORE_BASE = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm';
   var STALL_LIMIT_MS = 15000;   // fail only if NO new bytes arrive for this long
-  var INIT_TIMEOUT_MS = 15000;  // worker/wasm init after bytes are already local
+  var INIT_TIMEOUT_MS = 45000;  // WASM compile of ~30MB is CPU-bound and genuinely slow on mobile
 
   function withTimeout(promise, ms, tag){
     return new Promise(function(resolve, reject){
@@ -922,12 +922,16 @@
           return Promise.all([jsPromise, wasmPromise])
             .then(function(urls){
               clearInterval(stallWatcher);
-              if (onProgress) onProgress(-1, -1); // signal "initializing" phase
+              var initStart = Date.now();
+              var initTicker = setInterval(function(){
+                if (onProgress) onProgress(-1, Math.floor((Date.now() - initStart) / 1000));
+              }, 1000);
+              if (onProgress) onProgress(-1, 0);
               return withTimeout(
                 ffmpeg.load({ coreURL: urls[0], wasmURL: urls[1] }),
                 INIT_TIMEOUT_MS,
                 'FFMPEG_INIT_TIMEOUT'
-              );
+              ).finally(function(){ clearInterval(initTicker); });
             })
             .then(function(){
               ffmpegInstance = ffmpeg;
@@ -954,12 +958,16 @@
     return (bytes / 1024 / 1024).toFixed(1);
   }
 
-  function showEngineProgress(loaded, total){
+  function showEngineProgress(loaded, elapsedOrTotal){
     if (loaded < 0){
       progressBar.style.width = '100%';
-      statusEl.textContent = '엔진 초기화 중...';
+      var secs = elapsedOrTotal;
+      statusEl.textContent = secs > 0
+        ? '엔진 초기화 중... (' + secs + '초, 기기가 처음 한 번 컴파일하는 중이라 느릴 수 있어요)'
+        : '엔진 초기화 중...';
       return;
     }
+    var total = elapsedOrTotal;
     if (total > 0){
       var pct = clamp((loaded / total) * 100, 0, 100);
       progressBar.style.width = pct + '%';
